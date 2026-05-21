@@ -1,14 +1,19 @@
 #!/bin/bash
-# PreToolUse hook on Bash — block raw curl/wget against non-allowlisted
-# hosts; tell the operator to use safe-fetch instead.
+# PreToolUse hook on Bash — two purposes, evaluated in order:
+#   Stage 0: block any reference to the injection-gate marker dir,
+#            so the agent can't forge a Write/Edit authorization marker
+#            via the Bash tool. (Added in PR #54; closes the
+#            marker-forge route the slash commands gate against.)
+#   Stage 1+2: block raw curl/wget against non-allowlisted hosts;
+#              tell the operator to use safe-fetch instead.
 #
 # Allowlist parity with .claude/hooks/injection-gate-webfetch.sh is
 # deliberate. First-party Anthropic + own domains pass through; every
 # other URL is routed through safe-fetch (Docker-isolated + sanitized).
 # This is Session B's enforcement of scope Part 5 MVP item 4.
 #
-# Approach: two-stage match (avoids the brittleness of a single
-# all-purpose regex):
+# Stage 1+2 approach: two-stage match (avoids the brittleness of a
+# single all-purpose regex):
 #   1. Verify the command actually INVOKES curl/wget at a command
 #      boundary (start-of-string or after one of |&;`( — a plain space
 #      doesn't count, so `man wget` and `git curl` don't match).
@@ -21,9 +26,14 @@
 #   Mitigation: split tokens or use a placeholder in such strings.
 # - `if cond; then curl x; fi` is not caught (curl follows `then`, not
 #   a separator). Acceptable false negative for an obscure case.
+# - Stage 0 is a literal substring match on the marker-dir path. Path
+#   alias forms (brace expansion, string concatenation, encoded payloads,
+#   symlink dereference, multi-call variable indirection) bypass it.
+#   See the Stage-0 inline comment block for each class and the v2
+#   mitigations being considered. Acceptable for v1; closes naive forge.
 #
 # See docs/roadmaps/injection-gate-pillar.md Part 5 MVP item 4 and
-# Part 8 Session-B step 4.
+# Part 8 Session-B step 4 (and PR #54 for Stage 0).
 
 INPUT=$(cat)
 TOOL=$(echo "$INPUT" | jq -r '.tool_name // empty')

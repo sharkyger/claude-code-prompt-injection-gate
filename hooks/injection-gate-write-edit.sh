@@ -24,6 +24,24 @@
 #   - It matches the prior art the user already trusts
 #     (mark-code-review.sh / require-code-review.sh).
 #
+# Known limitations (v1):
+#   - Path normalization: the marker key is derived from the LITERAL
+#     PATH_RAW string the harness passes in tool_input.file_path. Two
+#     paths that resolve to the same file but differ textually
+#     (`/a/./b` vs `/a/b`, `/a/../a/b` vs `/a/b`, symlink alias vs
+#     target) hash differently and need separate markers. In practice
+#     the harness passes absolute canonical paths, but a hand-crafted
+#     Write with a non-canonical file_path would miss a marker for the
+#     canonical form. This fails CLOSED — a non-matching write is
+#     correctly blocked rather than mis-authorized — so it is a UX
+#     paper-cut, not a security gap.
+#   - TOCTOU between [ -f "$MARKER" ] and rm -f "$MARKER" is a race in
+#     principle, but the harness serializes tool calls (one PreToolUse
+#     hook fires at a time) and the marker is bound to one specific
+#     (category, path) pair — no shared resource a parallel call could
+#     exploit. No mitigation needed under the single-agent execution
+#     model; revisit if a multi-agent / parallel-tool model lands.
+#
 # See docs/roadmaps/injection-gate-pillar.md Part 5 MVP items 5-7 and
 # Part 6 Q3 (marker-file pattern locked in second brainstorm).
 

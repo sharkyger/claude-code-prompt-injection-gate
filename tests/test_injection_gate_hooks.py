@@ -3,6 +3,11 @@
 Hook scripts are bash; we exercise them via subprocess so the JSON
 contract surfaces the same way Claude Code would call them.
 
+Session A hooks are warn-only: they surface context to the model but
+never set a non-zero exit code, so all assertions check returncode == 0
+plus stdout content. Block-path tests arrive in Session B with the
+Bash + Write/Edit hooks (curl/wget rewrite + marker-file gate).
+
 See docs/roadmaps/injection-gate-pillar.md Part 5 MVP items 3 + 5.
 """
 

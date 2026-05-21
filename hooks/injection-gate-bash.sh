@@ -37,6 +37,73 @@ if [ -z "$COMMAND" ]; then
   exit 0
 fi
 
+# Stage 0: block any reference to the injection-gate marker dir.
+#
+# The Write/Edit hook gates writes to protected destinations behind a
+# marker file at /tmp/.claude-injection-gate/{category}-{hash}. The
+# Bash tool is otherwise free of that gate. Without this Stage 0, a
+# steered agent could `touch /tmp/.claude-injection-gate/rule-{hash}`
+# via Bash, then immediately Write CLAUDE.md, and the Write/Edit hook
+# would consume the forged marker as if the operator had approved.
+# The marker dir is the authorization protocol path — the agent has
+# no legitimate reason to reference it. The operator can ls/touch it
+# via the `!` prefix in chat (operator's shell, not the agent's
+# Bash tool).
+#
+# Block scope: ANY reference to the literal substring. Read ops blocked
+# too because a permissive read policy leaks info about which markers
+# exist (useful for time-attacks against the gate).
+#
+# Known bypass limits (acceptable for v1, documented for v2):
+#   - Brace expansion: `/tmp/.claude{,-}injection-gate` evades the
+#     literal substring check. Closing it would require shell parsing.
+#   - String concatenation: `"/tmp"/".claude-injection-gate"` — the
+#     contiguous substring isn't present in the raw command; the shell
+#     concatenates the adjacent quoted segments at parse time. Same
+#     class: `/tmp/.claude-${EMPTY}injection-gate` and friends.
+#   - Encoded payloads: `eval "touch $(printf L3RtcC8u…<base64>… | base64 -d)/rule"`
+#     or `eval $'\x2f\x74\x6d\x70…'` — the path is reconstructed at
+#     runtime; substring absent in the raw command. Same class covers
+#     `python3 -c` / `perl -e` with an obfuscated string.
+#   - Symlink dereference: agent creates /tmp/foo -> marker-dir, then
+#     writes via /tmp/foo/...; the command text doesn't reference the
+#     marker dir literally.
+#   - Variable indirection across separate Bash calls: agent assigns
+#     a var in one call, dereferences in another. We catch the
+#     assignment if its value contains the substring; not the later
+#     dereference if it doesn't.
+#
+# These bypasses all require an attacker sophisticated enough to chain
+# multiple Bash invocations OR obfuscate the path — non-trivial cost
+# for the attacker, while the simple substring block closes the
+# "naive forge attempt" path that any unsophisticated injection would
+# take. v2 mitigations: marker dir under a path the agent's user
+# cannot symlink-target / write to (POSIX-ACL), OR HMAC-signed marker
+# names with a key the agent doesn't have, OR shell parsing in the
+# hook (heavy, brittle).
+if echo "$COMMAND" | grep -qF '/tmp/.claude-injection-gate'; then
+  cat >&2 <<MSG
+BLOCKED: agent must not reference the injection-gate marker dir.
+
+  Path:    /tmp/.claude-injection-gate
+  Command: ${COMMAND}
+
+This is the operator-authorization protocol path. The agent never
+creates, lists, reads, or removes markers — that would defeat the
+entire purpose of the gate. A marker proves operator approval, not
+agent intent.
+
+If a Write/Edit got blocked and you need a marker:
+  - Ask the operator to run the appropriate slash command
+    (/save-memory, /save-rule, /edit-skill, /edit-settings, /edit-hook)
+  - Or ask the operator to touch the marker from their own shell
+    via the ! prefix in chat (executes in operator context, not agent)
+
+See docs/roadmaps/injection-gate-pillar.md Part 1 (threat model).
+MSG
+  exit 2
+fi
+
 # Stage 1: does the command invoke curl/wget at a command boundary?
 # Word-boundary chars BEFORE: start-of-string OR shell separator
 # (|, &, ;, backtick, open-paren). A plain space does NOT count —

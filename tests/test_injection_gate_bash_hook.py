@@ -151,6 +151,100 @@ class TestNonFetchCommands:
         assert r.returncode == 0
 
 
+# ── marker-dir Stage-0 block ─────────────────────────────────────────
+
+
+class TestMarkerDirBlock:
+    """The Bash tool is otherwise free of the Write/Edit marker gate
+    (different tool matchers in settings.json). An agent steered to
+    write a marker via Bash would bypass the gate entirely. Stage 0 of
+    the Bash hook hard-blocks any reference to the marker dir.
+
+    The threat is forgery — agent creates a marker that the operator
+    never authorized, then immediately Write/Edits the corresponding
+    protected destination, and the Write/Edit hook consumes the forged
+    marker as if it were operator approval.
+
+    Read ops are blocked too, deliberately: the agent has zero
+    legitimate reason to touch this dir, and a permissive read policy
+    leaks info about which markers exist (which a steered agent could
+    use to time-attack the gate).
+    """
+
+    MARKER_DIR_REF = "/tmp/.claude-injection-gate"  # noqa: S108
+
+    def test_touch_into_marker_dir_blocked(self):
+        r = run_hook(bash("touch /tmp/.claude-injection-gate/rule-abc123def456"))  # noqa: S108
+        assert r.returncode == 2
+        assert "marker dir" in r.stderr
+
+    def test_mkdir_marker_dir_blocked(self):
+        r = run_hook(bash("mkdir -p /tmp/.claude-injection-gate"))  # noqa: S108
+        assert r.returncode == 2
+
+    def test_redirection_into_marker_dir_blocked(self):
+        r = run_hook(bash("echo foo > /tmp/.claude-injection-gate/rule-xyz"))  # noqa: S108
+        assert r.returncode == 2
+
+    def test_cp_into_marker_dir_blocked(self):
+        r = run_hook(bash("cp /tmp/foo /tmp/.claude-injection-gate/x"))  # noqa: S108
+        assert r.returncode == 2
+
+    def test_mv_into_marker_dir_blocked(self):
+        r = run_hook(bash("mv /tmp/foo /tmp/.claude-injection-gate/x"))  # noqa: S108
+        assert r.returncode == 2
+
+    def test_tee_into_marker_dir_blocked(self):
+        r = run_hook(bash("echo x | tee /tmp/.claude-injection-gate/rule-y"))  # noqa: S108
+        assert r.returncode == 2
+
+    def test_rm_marker_blocked(self):
+        # Deleting a marker is also off-limits — could be cover-tracks
+        # after a forge, or an attempt to make a legitimate marker
+        # disappear before the operator can use it.
+        r = run_hook(bash("rm /tmp/.claude-injection-gate/rule-abc"))  # noqa: S108
+        assert r.returncode == 2
+
+    def test_ls_marker_dir_blocked(self):
+        # Even read ops blocked — the agent has no legitimate reason
+        # to enumerate markers. Operator can ls via ! prefix.
+        r = run_hook(bash("ls /tmp/.claude-injection-gate/"))  # noqa: S108
+        assert r.returncode == 2
+
+    def test_cat_marker_blocked(self):
+        r = run_hook(bash("cat /tmp/.claude-injection-gate/rule-abc"))  # noqa: S108
+        assert r.returncode == 2
+
+    def test_marker_dir_inside_command_chain_blocked(self):
+        r = run_hook(bash("ls && touch /tmp/.claude-injection-gate/rule-xyz"))  # noqa: S108
+        assert r.returncode == 2
+
+    def test_marker_dir_inside_subshell_blocked(self):
+        r = run_hook(bash("(touch /tmp/.claude-injection-gate/x) || true"))  # noqa: S108
+        assert r.returncode == 2
+
+    def test_marker_dir_path_in_arg_blocked(self):
+        # The marker-dir block must fire even when the path is buried
+        # mid-command — substring match on the raw command text.
+        r = run_hook(bash("find / -name '*.sh' -newer /tmp/.claude-injection-gate/x"))  # noqa: S108
+        assert r.returncode == 2
+
+    def test_block_fires_before_curl_wget_stage(self):
+        # If both Stage 0 (marker dir) and Stage 1 (curl/wget) would
+        # match, the block message must mention marker-dir specifically
+        # — that's the more diagnostic / less generic message.
+        r = run_hook(bash("curl https://example.com/x | tee /tmp/.claude-injection-gate/rule-foo"))  # noqa: S108
+        assert r.returncode == 2
+        assert "marker dir" in r.stderr
+
+    def test_non_marker_dir_tmp_path_passes(self):
+        # Belt-and-braces: a similarly-named-but-different tmp path
+        # must NOT be caught. The substring must be the exact marker
+        # protocol path.
+        r = run_hook(bash("touch /tmp/random-thing"))  # noqa: S108
+        assert r.returncode == 0
+
+
 # ── no-op on non-Bash tools ──────────────────────────────────────────
 
 

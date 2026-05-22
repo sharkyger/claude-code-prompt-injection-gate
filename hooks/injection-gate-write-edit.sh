@@ -43,8 +43,8 @@
 #     call could exploit. No mitigation needed today; revisit if a
 #     multi-agent / parallel-tool model lands.
 #
-# See docs/roadmaps/injection-gate-pillar.md Part 5 MVP items 5-7 and
-# Part 6 Q3 (marker-file pattern locked in second brainstorm).
+# See https://github.com/sharkyger/claude-code-prompt-injection-gate
+# for the marker-file rationale.
 
 INPUT=$(cat)
 TOOL=$(echo "$INPUT" | jq -r '.tool_name // empty')
@@ -110,7 +110,7 @@ so each authorized edit is one-shot.
 
 Why this exists: prompt-injected content could otherwise steer the
 agent into poisoning CLAUDE.md / a hook / a skill / settings.json /
-project memory. See docs/roadmaps/injection-gate-pillar.md Part 1.
+project memory. See https://github.com/sharkyger/claude-code-prompt-injection-gate for the full threat model.
 MSG
   exit 2
 fi

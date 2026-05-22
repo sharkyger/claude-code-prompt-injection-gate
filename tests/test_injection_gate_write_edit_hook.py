@@ -13,8 +13,6 @@ Marker name = ``{category}-{sha256_first_16(abs_path)}`` so a marker
 for path A cannot unlock a write to path B (or to a same-category
 sibling).
 
-See ``docs/roadmaps/injection-gate-pillar.md`` Part 5 MVP items 5-7
-and Part 8 Session-B steps 5-7.
 """
 
 from __future__ import annotations
@@ -27,7 +25,7 @@ from pathlib import Path
 
 import pytest
 
-HOOK = Path(__file__).parent.parent / ".claude" / "hooks" / "injection-gate-write-edit.sh"
+HOOK = Path(__file__).parent.parent / "hooks" / "injection-gate-write-edit.sh"
 MARKER_DIR = Path("/tmp/.claude-injection-gate")  # noqa: S108 — protocol path, mirrors mark-code-review.sh
 
 

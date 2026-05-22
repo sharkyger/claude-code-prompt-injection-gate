@@ -32,8 +32,8 @@
 #   See the Stage-0 inline comment block for each class and the v2
 #   mitigations being considered. Acceptable for v1; closes naive forge.
 #
-# See docs/roadmaps/injection-gate-pillar.md Part 5 MVP item 4 and
-# Part 8 Session-B step 4 (and PR #54 for Stage 0).
+# See https://github.com/sharkyger/claude-code-prompt-injection-gate
+# for the threat model and full architecture.
 
 INPUT=$(cat)
 TOOL=$(echo "$INPUT" | jq -r '.tool_name // empty')
@@ -109,7 +109,7 @@ If a Write/Edit got blocked and you need a marker:
   - Or ask the operator to touch the marker from their own shell
     via the ! prefix in chat (executes in operator context, not agent)
 
-See docs/roadmaps/injection-gate-pillar.md Part 1 (threat model).
+See https://github.com/sharkyger/claude-code-prompt-injection-gate for the threat model.
 MSG
   exit 2
 fi
@@ -173,14 +173,15 @@ BLOCKED: raw curl/wget against non-allowlisted host.
 Use safe-fetch instead — the fetch runs inside a Docker-isolated
 sandbox and the response is returned wrapped in <UNTRUSTED-WEB> tags:
 
-  scripts/safe-fetch ${FULL_URL}
+  safe-fetch ${FULL_URL}
 
 If the URL is genuinely trustworthy (first-party docs, your own
 infra), extend the allowlist in BOTH files:
 
-  .claude/hooks/injection-gate-bash.sh
-  .claude/hooks/injection-gate-webfetch.sh
+  ~/.claude/hooks/injection-gate-bash.sh
+  ~/.claude/hooks/injection-gate-webfetch.sh
 
-See docs/roadmaps/injection-gate-pillar.md Part 6 Q1.
+See https://github.com/sharkyger/claude-code-prompt-injection-gate
+for the allowlist syntax and threat model.
 MSG
 exit 2

@@ -1,6 +1,7 @@
-"""Tests for the 5 marker-writing slash commands (Session B PR-2).
+"""Tests for the 5 marker-writing slash commands.
 
-Each ``.claude/commands/{name}.md`` file is a Claude Code slash command.
+Each ``commands/{name}.md`` file is a Claude Code slash command (Claude
+Code itself looks for them under ``~/.claude/commands/`` after install).
 The body contains a ``!``-prefixed shell line that touches a marker
 file under ``/tmp/.claude-injection-gate/``. The matching Write/Edit
 hook consumes the marker on the operator's next Write/Edit to the same
@@ -12,9 +13,6 @@ substituted, actually creates the marker that the hook will accept.
 The round-trip pass (slash command writes marker → hook consumes it)
 is the contract that prevents the agent from forging the marker
 itself.
-
-See ``docs/roadmaps/injection-gate-pillar.md`` Part 5 MVP items 6-7
-and Part 8 Session-B step 6.
 """
 
 from __future__ import annotations
@@ -29,8 +27,8 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).parent.parent
-COMMANDS_DIR = REPO_ROOT / ".claude" / "commands"
-HOOK = REPO_ROOT / ".claude" / "hooks" / "injection-gate-write-edit.sh"
+COMMANDS_DIR = REPO_ROOT / "commands"
+HOOK = REPO_ROOT / "hooks" / "injection-gate-write-edit.sh"
 MARKER_DIR = Path("/tmp/.claude-injection-gate")  # noqa: S108 — protocol path
 
 

@@ -5,10 +5,9 @@ them unless the destination host is on the first-party allowlist (same
 set as the WebFetch hook). Blocked invocations exit 2 with a clear
 "use safe-fetch <url> instead" message.
 
-Allowlist parity with ``.claude/hooks/injection-gate-webfetch.sh`` is
+Allowlist parity with ``hooks/injection-gate-webfetch.sh`` is
 deliberate — same trust boundary, two enforcement points (Bash and
-WebFetch). See ``docs/roadmaps/injection-gate-pillar.md`` Part 5 MVP
-item 4 and Part 8 Session-B step 4.
+WebFetch).
 
 Known limitation (mirrored from ``require-code-review.sh`` prior art):
 the hook regex-matches the raw command text, not a parsed shell AST.
@@ -23,7 +22,7 @@ import json
 import subprocess
 from pathlib import Path
 
-HOOK = Path(__file__).parent.parent / ".claude" / "hooks" / "injection-gate-bash.sh"
+HOOK = Path(__file__).parent.parent / "hooks" / "injection-gate-bash.sh"
 
 
 def run_hook(payload: dict) -> subprocess.CompletedProcess:

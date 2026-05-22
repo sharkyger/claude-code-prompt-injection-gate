@@ -1,21 +1,19 @@
-"""Tests for injection-gate Claude Code hooks (Session A).
+"""Tests for the WebFetch + Agent injection-gate hooks (warn-only).
 
 Hook scripts are bash; we exercise them via subprocess so the JSON
 contract surfaces the same way Claude Code would call them.
 
-Session A hooks are warn-only: they surface context to the model but
+These two hooks are warn-only: they surface context to the model but
 never set a non-zero exit code, so all assertions check returncode == 0
-plus stdout content. Block-path tests arrive in Session B with the
-Bash + Write/Edit hooks (curl/wget rewrite + marker-file gate).
-
-See docs/roadmaps/injection-gate-pillar.md Part 5 MVP items 3 + 5.
+plus stdout content. Block-path tests live in the Bash and Write/Edit
+hook test files.
 """
 
 import json
 import subprocess
 from pathlib import Path
 
-HOOKS_DIR = Path(__file__).parent.parent / ".claude" / "hooks"
+HOOKS_DIR = Path(__file__).parent.parent / "hooks"
 WEBFETCH_HOOK = HOOKS_DIR / "injection-gate-webfetch.sh"
 AGENT_HOOK = HOOKS_DIR / "injection-gate-agent.sh"
 
@@ -47,22 +45,6 @@ class TestWebFetchAllowlist:
                 "tool_name": "WebFetch",
                 "tool_input": {"url": "https://anthropic.com/research/prompt-injection-defenses"},
             },
-        )
-        assert result.returncode == 0
-        assert result.stdout == ""
-
-    def test_allowlist_augatho_subdomain_passes_silently(self):
-        result = run_hook(
-            WEBFETCH_HOOK,
-            {"tool_name": "WebFetch", "tool_input": {"url": "https://www.augatho.com/blog"}},
-        )
-        assert result.returncode == 0
-        assert result.stdout == ""
-
-    def test_allowlist_augatho_apex_passes_silently(self):
-        result = run_hook(
-            WEBFETCH_HOOK,
-            {"tool_name": "WebFetch", "tool_input": {"url": "https://augatho.com/"}},
         )
         assert result.returncode == 0
         assert result.stdout == ""

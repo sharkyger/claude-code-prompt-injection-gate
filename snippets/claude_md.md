@@ -2,12 +2,15 @@
 Layer 4 system rule for claude-code-prompt-injection-gate.
 
 Insert this block into CLAUDE.md (user-level or project-level) so the
-operator obeys the same rule the hooks enforce. The Session C
-installer (`safe-fetch --install-claude-hooks`) writes this into
-`~/.claude/CLAUDE.md` idempotently; for Session A, append manually.
+operator obeys the same rule the hooks enforce.
+`safe-fetch --install-claude-hooks` writes this into
+`~/.claude/CLAUDE.md` idempotently between sentinel markers.
 
-See docs/roadmaps/injection-gate-pillar.md Part 2 Layer 4 + Part 5
-MVP item 8.
+The literal tag names below are intentionally documented here — the
+defense relies on the sanitizer escaping any matching sequences that
+appear INSIDE fetched content, not on the tag name being secret
+(Kerckhoffs's principle). Auditors should be able to verify what the
+agent treats as a trust boundary.
 -->
 
 ## Untrusted external content (prompt-injection-gate)

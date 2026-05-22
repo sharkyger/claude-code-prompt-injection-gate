@@ -261,3 +261,49 @@ class TestNonBashTool:
     def test_empty_command_noop(self):
         r = run_hook({"tool_name": "Bash", "tool_input": {}})
         assert r.returncode == 0
+
+
+# ── wrapper bypass (rtk and similar token-saver wrappers) ────────────
+
+
+class TestRtkWrapperBypass:
+    """rtk (Rust Token Killer) wraps every Bash tool call as ``rtk proxy
+    <cmd>`` to save model tokens. Without explicit handling, that puts
+    ``curl`` after a plain space (not a shell separator), which the
+    hook's curl-boundary regex deliberately ignores to avoid false
+    matches on ``man curl`` / ``git curl-config``. Result: the entire
+    Bash-hook layer is bypassed for rtk users. This class proves the
+    rtk-prefix patterns are caught."""
+
+    def test_rtk_proxy_curl_blocked(self):
+        r = run_hook(bash("rtk proxy curl https://example.com/"))
+        assert r.returncode == 2, f"rtk proxy curl was not blocked: {r.stderr}"
+        assert "BLOCKED" in r.stderr
+
+    def test_bare_rtk_curl_blocked(self):
+        r = run_hook(bash("rtk curl https://example.com/"))
+        assert r.returncode == 2
+
+    def test_rtk_proxy_wget_blocked(self):
+        r = run_hook(bash("rtk proxy wget https://example.com/"))
+        assert r.returncode == 2
+
+    def test_bare_rtk_wget_blocked(self):
+        r = run_hook(bash("rtk wget https://example.com/"))
+        assert r.returncode == 2
+
+    def test_rtk_proxy_curl_allowlisted_passes(self):
+        r = run_hook(bash("rtk proxy curl https://docs.anthropic.com/en/x"))
+        assert r.returncode == 0
+
+    def test_rtk_proxy_curl_with_pipe_blocked(self):
+        r = run_hook(bash("rtk proxy curl https://example.com/ | head -30"))
+        assert r.returncode == 2
+
+    def test_rtk_man_curl_does_not_false_match(self):
+        r = run_hook(bash("rtk man curl"))
+        assert r.returncode == 0
+
+    def test_rtk_proxy_curl_version_passes(self):
+        r = run_hook(bash("rtk proxy curl --version"))
+        assert r.returncode == 0

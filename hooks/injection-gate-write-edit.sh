@@ -25,16 +25,24 @@
 #     (mark-code-review.sh / require-code-review.sh).
 #
 # Known limitations (v1):
-#   - Path normalization: the marker key is derived from the LITERAL
-#     PATH_RAW string the harness passes in tool_input.file_path. Two
-#     paths that resolve to the same file but differ textually
-#     (`/a/./b` vs `/a/b`, `/a/../a/b` vs `/a/b`, symlink alias vs
-#     target) hash differently and need separate markers. In practice
-#     the harness passes absolute canonical paths, but a hand-crafted
-#     Write with a non-canonical file_path would miss a marker for the
-#     canonical form. This fails CLOSED — a non-matching write is
-#     correctly blocked rather than mis-authorized — so it is a UX
-#     paper-cut, not a security gap.
+#   - Path normalization on the hook side is intentionally NOT performed
+#     here: the marker key is derived from the LITERAL PATH_RAW string
+#     the harness passes in tool_input.file_path. Two paths that resolve
+#     to the same file but differ textually (`/a/./b` vs `/a/b`,
+#     `/a/../a/b` vs `/a/b`, symlink alias vs target) hash differently
+#     and would need separate markers. In practice the harness passes
+#     absolute canonical paths, so this is rarely a problem in normal
+#     use; a hand-crafted Write with a non-canonical file_path would
+#     miss a marker. This fails CLOSED — a non-matching write is
+#     correctly blocked rather than mis-authorized.
+#
+#     UX-side normalization (collapse whitespace, expanduser, abspath)
+#     is performed by the slash commands themselves before they hash
+#     and write the marker — see `commands/save-memory.md` and siblings.
+#     That way the operator can type `~/path` or paste a line-wrapped
+#     path with stray whitespace and the marker still matches the
+#     canonical form the hook will see. Tests:
+#     `tests/test_marker_path_normalize.py`.
 #   - TOCTOU between [ -f "$MARKER" ] and rm -f "$MARKER" is a race in
 #     principle, but the harness currently serializes tool calls (one
 #     PreToolUse hook fires at a time, as of Claude Code's single-

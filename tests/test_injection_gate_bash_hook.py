@@ -1,9 +1,18 @@
-"""Tests for the Bash injection-gate hook (Session B).
+"""Tests for the Bash injection-gate hook.
 
-PreToolUse on Bash. Detects ``curl`` and ``wget`` invocations and blocks
-them unless the destination host is on the first-party allowlist (same
-set as the WebFetch hook). Blocked invocations exit 2 with a clear
-"use safe-fetch <url> instead" message.
+PreToolUse on Bash. Two detectors:
+
+* **Stage 1 — known fetchers.** ``curl``, ``wget``, ``wget2``, HTTPie
+  family (``http`` / ``https`` / ``httpie`` / ``xh`` / ``curlie``),
+  ``aria2c``, and text-mode browsers (``lynx`` / ``links`` / ``w3m`` /
+  ``elinks``). Block unless the destination host is on the first-party
+  allowlist (same set as the WebFetch hook).
+* **Stage A — inline interpreter fetches** (v1.1). ``python -c``,
+  ``node -e``, ``php -r``, ``perl -e``, ``ruby -e``, ``deno`` / ``bun``
+  invocations whose inline body references a network keyword.
+
+Blocked invocations exit 2 with a clear "use safe-fetch <url> instead"
+message on stderr.
 
 Allowlist parity with ``hooks/injection-gate-webfetch.sh`` is
 deliberate — same trust boundary, two enforcement points (Bash and
@@ -11,9 +20,9 @@ WebFetch).
 
 Known limitation (mirrored from ``require-code-review.sh`` prior art):
 the hook regex-matches the raw command text, not a parsed shell AST.
-Literal ``curl example.com`` inside a heredoc or ``python -c`` body
-triggers a false positive. We test that the typical surface holds; the
-heredoc edge case is documented in the hook header.
+Literal ``curl example.com`` inside a heredoc body triggers a false
+positive. We test that the typical surface holds; the heredoc edge
+case is documented in the hook header.
 """
 
 from __future__ import annotations
@@ -21,6 +30,8 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
+
+import pytest
 
 HOOK = Path(__file__).parent.parent / "hooks" / "injection-gate-bash.sh"
 
@@ -90,6 +101,63 @@ class TestBlockedFetches:
     def test_no_scheme_url_still_blocked(self):
         r = run_hook(bash("curl example.com"))
         assert r.returncode == 2
+
+
+# ── expanded fetcher list (v1.1) ─────────────────────────────────────
+
+
+class TestExpandedFetcherList:
+    """v1.1 widened the Stage-1 detector beyond curl/wget. Each
+    parametrized case uses one tool at a non-allowlisted host and
+    asserts the block message points at safe-fetch.
+
+    Tools intentionally excluded from this list (see hook header):
+    ``open`` — opens the URL in the user's browser; does not return
+    content to the agent's context, so it isn't a safe-fetch bypass.
+    """
+
+    @pytest.mark.parametrize(
+        "fetcher_cmd",
+        [
+            "wget2 https://example.com/",
+            "http https://example.com/",          # HTTPie
+            "https https://example.com/",         # HTTPie HTTPS alias
+            "httpie https://example.com/",
+            "xh https://example.com/",            # Rust HTTPie clone
+            "curlie https://example.com/",
+            "aria2c https://example.com/file.tar",
+            "lynx -dump https://example.com/",
+            "links -dump https://example.com/",
+            "w3m -dump https://example.com/",
+            "elinks -dump https://example.com/",
+        ],
+    )
+    def test_expanded_fetcher_blocked(self, fetcher_cmd: str):
+        r = run_hook(bash(fetcher_cmd))
+        assert r.returncode == 2, f"{fetcher_cmd!r} was not blocked: {r.stderr}"
+        assert "safe-fetch" in r.stderr
+
+    @pytest.mark.parametrize(
+        "tool",
+        ["wget2", "http", "https", "httpie", "xh", "curlie", "aria2c", "lynx", "links", "w3m", "elinks"],
+    )
+    def test_expanded_fetcher_to_allowlisted_passes(self, tool: str):
+        r = run_hook(bash(f"{tool} https://docs.anthropic.com/x"))
+        assert r.returncode == 0, f"{tool} to allowlisted host was blocked: {r.stderr}"
+
+    @pytest.mark.parametrize(
+        "non_fetch_cmd",
+        [
+            "man http",
+            "man lynx",
+            "man w3m",
+            "echo http is a fetcher",
+            "man httpie",
+        ],
+    )
+    def test_fetcher_substring_in_other_command_passes(self, non_fetch_cmd: str):
+        r = run_hook(bash(non_fetch_cmd))
+        assert r.returncode == 0, f"{non_fetch_cmd!r} false-positive: {r.stderr}"
 
 
 # ── pass paths ───────────────────────────────────────────────────────

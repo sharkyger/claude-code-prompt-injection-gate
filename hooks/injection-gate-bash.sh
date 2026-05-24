@@ -114,7 +114,7 @@ MSG
   exit 2
 fi
 
-# Stage 1: does the command invoke curl/wget at a command boundary?
+# Stage 1: does the command invoke a known fetcher at a command boundary?
 # Word-boundary chars BEFORE: start-of-string OR shell separator
 # (|, &, ;, backtick, open-paren). A plain space does NOT count —
 # that's how we avoid catching `man wget` or `git curl-config`.
@@ -122,17 +122,30 @@ fi
 # closes the `curl;rm` gap where a separator butts directly against
 # the command name with no whitespace.
 #
+# Fetcher list: curl/wget (originals), wget2 (next-gen wget), the
+# HTTPie family (http/https/httpie/xh/curlie), aria2c (downloader),
+# and text-mode browsers (lynx/links/w3m/elinks) that return page
+# content. Note `http` and `https` as Stage-1 tokens are HTTPie's
+# binary names; they cannot false-match a URL like `https://x.com`
+# because the trailing boundary requires a space/separator/EOS, and
+# `https://` never sits at one (the `:` is not in the boundary set).
+#
+# `open` (macOS) is deliberately NOT in this list — it opens a URL in
+# the user's browser but does not return content to the agent's
+# context, so it's not a safe-fetch bypass. Browser-exfil concerns
+# are a separate threat handled outside this hook.
+#
 # The optional `rtk[[:space:]]+(proxy[[:space:]]+)?` prefix catches the
 # rtk (Rust Token Killer) wrapper pattern. rtk's Claude Code hook
 # rewrites Bash calls to `rtk proxy <cmd>` for token savings; without
-# this allowance, every rtk-wrapped curl/wget would slip past the
-# fetch gate because curl is then preceded by a plain space, not a
+# this allowance, every rtk-wrapped fetcher would slip past the
+# gate because the fetcher is then preceded by a plain space, not a
 # separator. The prefix match preserves the `man curl` / `git
 # curl-config` false-positive shield — those are preceded by a non-rtk
-# token, so the rtk group doesn't match and the bare-curl path
+# token, so the rtk group doesn't match and the bare path
 # requires a separator that they don't satisfy.
 if ! echo "$COMMAND" \
-     | grep -qE '(^|[|&;`(])[[:space:]]*(rtk[[:space:]]+(proxy[[:space:]]+)?)?(curl|wget)([[:space:]|&;]|$)'; then
+     | grep -qE '(^|[|&;`(])[[:space:]]*(rtk[[:space:]]+(proxy[[:space:]]+)?)?(curl|wget|wget2|http|https|httpie|xh|curlie|aria2c|lynx|links|w3m|elinks)([[:space:]|&;]|$)'; then
   exit 0
 fi
 
@@ -176,7 +189,7 @@ case "$URL_PART" in
 esac
 
 cat >&2 <<MSG
-BLOCKED: raw curl/wget against non-allowlisted host.
+BLOCKED: raw fetcher against non-allowlisted host.
 
   Host: ${HOST}
 
@@ -188,8 +201,8 @@ sandbox and the response is returned wrapped in <UNTRUSTED-WEB> tags:
 If the URL is genuinely trustworthy (first-party docs, your own
 infra), extend the allowlist in BOTH files:
 
-  ~/.claude/hooks/injection-gate-bash.sh
-  ~/.claude/hooks/injection-gate-webfetch.sh
+  hooks/injection-gate-bash.sh
+  hooks/injection-gate-webfetch.sh
 
 See https://github.com/sharkyger/claude-code-prompt-injection-gate
 for the allowlist syntax and threat model.

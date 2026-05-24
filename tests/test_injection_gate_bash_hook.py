@@ -375,3 +375,87 @@ class TestRtkWrapperBypass:
     def test_rtk_proxy_curl_version_passes(self):
         r = run_hook(bash("rtk proxy curl --version"))
         assert r.returncode == 0
+
+
+# ── Stage A: inline interpreter fetches (v1.1) ───────────────────────
+
+
+class TestInterpreterFetchBlock:
+    """v1.1 added a pre-Stage-1 detector for inline interpreter fetches.
+    A steered agent can otherwise bypass the curl/wget gate with a
+    one-liner like ``python3 -c "import urllib...".
+
+    The detector requires BOTH:
+      1. interpreter + inline-eval flag (-c / -e / -r) at command
+         boundary, and
+      2. the script body references a known networking primitive
+         (urllib, requests, fetch(, Net::HTTP, ...) or contains a
+         literal http(s):// URL.
+
+    Negative cases below confirm benign interpreter code passes.
+    """
+
+    @pytest.mark.parametrize(
+        "cmd",
+        [
+            # python -c with the most common network modules
+            "python -c \"import urllib.request; urllib.request.urlopen('https://x.com')\"",
+            "python3 -c \"import urllib.request; urllib.request.urlopen('https://x.com')\"",
+            "python3 -c \"import requests; requests.get('https://x.com')\"",
+            "python3 -c \"import httpx; httpx.get('https://x.com')\"",
+            # node / nodejs -e
+            "node -e \"fetch('https://x.com').then(r=>r.text())\"",
+            "nodejs -e \"const http=require('http'); http.get('https://x.com')\"",
+            # php -r
+            "php -r \"$c=curl_init('https://x.com');\"",
+            "php -r \"echo file_get_contents('https://x.com');\"",
+            # perl -e
+            "perl -e \"use LWP::Simple; get('https://x.com');\"",
+            "perl -e \"use HTTP::Tiny; HTTP::Tiny->new->get('https://x.com');\"",
+            # ruby -e
+            "ruby -e \"require 'net/http'; Net::HTTP.get(URI('https://x.com'))\"",
+            "ruby -e \"require 'open-uri'; URI.open('https://x.com').read\"",
+            # deno / bun
+            "deno -e \"fetch('https://x.com')\"",
+            "bun -e \"fetch('https://x.com')\"",
+        ],
+    )
+    def test_inline_interpreter_fetch_blocked(self, cmd: str):
+        r = run_hook(bash(cmd))
+        assert r.returncode == 2, f"interpreter fetch not blocked: {cmd!r}\nstderr={r.stderr}"
+        assert "inline interpreter" in r.stderr.lower() or "BLOCKED" in r.stderr
+        assert "safe-fetch" in r.stderr
+
+    @pytest.mark.parametrize(
+        "cmd",
+        [
+            # Plain benign one-liners — interpreter + -c/-e/-r but no
+            # network keyword in the body. Must pass.
+            "python3 -c \"print(2+2)\"",
+            "python3 -c \"import os; print(os.getcwd())\"",
+            "node -e \"console.log(1+1)\"",
+            "php -r \"echo PHP_VERSION;\"",
+            "perl -e \"print scalar(localtime), qq(\\n)\"",
+            "ruby -e \"puts RUBY_VERSION\"",
+        ],
+    )
+    def test_benign_interpreter_passes(self, cmd: str):
+        r = run_hook(bash(cmd))
+        assert r.returncode == 0, f"benign interpreter blocked: {cmd!r}\nstderr={r.stderr}"
+
+    def test_interpreter_with_flag_before_eval_blocked(self):
+        # `python3 -W ignore -c "..."` — the regex allows arbitrary
+        # non-space-containing arg tokens between interpreter and the
+        # -c/-e flag.
+        r = run_hook(bash("python3 -W ignore -c \"import urllib.request; urllib.request.urlopen('https://x.com')\""))
+        assert r.returncode == 2
+
+    def test_interpreter_in_command_chain_blocked(self):
+        # `; python3 -c ...` after a separator still triggers.
+        r = run_hook(bash("ls && python3 -c \"import urllib.request; urllib.request.urlopen('https://x.com')\""))
+        assert r.returncode == 2
+
+    def test_rtk_wrapped_interpreter_blocked(self):
+        # rtk wrapping must not be a Stage-A bypass either.
+        r = run_hook(bash("rtk proxy python3 -c \"import urllib.request; urllib.request.urlopen('https://x.com')\""))
+        assert r.returncode == 2

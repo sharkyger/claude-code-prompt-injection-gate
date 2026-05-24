@@ -1,11 +1,16 @@
 #!/bin/bash
-# PreToolUse hook on Bash — two purposes, evaluated in order:
+# PreToolUse hook on Bash — four checks, evaluated in order:
 #   Stage 0: block any reference to the injection-gate marker dir,
 #            so the agent can't forge a Write/Edit authorization marker
 #            via the Bash tool. (Added in PR #54; closes the
 #            marker-forge route the slash commands gate against.)
-#   Stage 1+2: block raw curl/wget against non-allowlisted hosts;
-#              tell the operator to use safe-fetch instead.
+#   Stage A: block inline interpreter fetches — python/node/php/perl/
+#            ruby/deno/bun with -c/-e/-r flag whose body references a
+#            known networking primitive. Closes the "skip the gate by
+#            using a one-liner" escape hatch. (v1.1)
+#   Stage 1+2: block raw fetchers (curl/wget/wget2/HTTPie/aria2c/
+#              text-mode browsers) against non-allowlisted hosts; tell
+#              the operator to use safe-fetch instead.
 #
 # Allowlist parity with .claude/hooks/injection-gate-webfetch.sh is
 # deliberate. First-party Anthropic + own domains pass through; every
@@ -114,7 +119,72 @@ MSG
   exit 2
 fi
 
-# Stage 1: does the command invoke curl/wget at a command boundary?
+# Stage A: inline interpreter network fetch detection.
+#
+# Detect `<interpreter> ... -c|-e|-r '...<network-call>...'` patterns.
+# Two-stage like Stage 1+2: (a) verify the command actually invokes
+# python/node/php/perl/ruby/deno/bun with a -c/-e/-r inline flag, and
+# (b) the script text references a known networking primitive or
+# contains a literal http(s):// URL. Both must match to block.
+#
+# This closes the obvious "skip safe-fetch by using a one-liner"
+# escape hatch:
+#
+#   python3 -c "import urllib.request as r; print(r.urlopen('https://x').read())"
+#
+# It is NOT a sandbox — heredoc bodies, base64-encoded URLs, sourcing
+# dotfiles, or writing a script to disk and exec'ing it all bypass
+# the regex. v1.1 covers the naive case; closing the bypasses needs
+# OS-level network namespacing, not regex.
+#
+# False-positive shield: the inner network-keyword check is REQUIRED
+# in addition to the interpreter+flag check, so `python3 -c "print(2+2)"`
+# does NOT match. The keyword list deliberately stays narrow:
+# network module / function names, or a literal http(s):// URL.
+#
+# Inline-flag list (-[ceErR]) covers the canonical inline-eval flags
+# across the supported interpreters:
+#   python: -c
+#   node:   -e (and --eval)
+#   php:    -r
+#   perl:   -e (and -E)
+#   ruby:   -e
+#   deno:   -e via `deno eval`; the bare flag is also -e
+#   bun:    -e (and --eval)
+if echo "$COMMAND" \
+     | grep -qE '(^|[|&;`(])[[:space:]]*(rtk[[:space:]]+(proxy[[:space:]]+)?)?(python3?|node|nodejs|deno|bun|php|perl|ruby)[[:space:]]+([A-Za-z0-9_/.=:+-]+[[:space:]]+)*-[ceErR][[:space:]]+' \
+   && echo "$COMMAND" \
+     | grep -qE 'https?://|urllib|urlopen|requests\.|httpx|aiohttp|http\.client|fetch[[:space:]]*\(|http\.get|https\.get|axios|file_get_contents|curl_init|LWP|HTTP::Tiny|HTTP::Request|Net::HTTP|open-uri'; then
+  cat >&2 <<MSG
+BLOCKED: inline interpreter fetch is not allowed.
+
+  Command (truncated): ${COMMAND:0:200}
+
+Use safe-fetch instead — runs inside a Docker-isolated sandbox and
+returns the response wrapped in <UNTRUSTED-WEB> tags so the Layer-4
+prompt-injection rule applies:
+
+  safe-fetch <url>
+
+A one-liner like
+
+  python3 -c "import urllib.request as r; r.urlopen('https://x').read()"
+
+would otherwise bypass the curl/wget gate. Inline interpreter fetches
+are blocked across python / node / php / perl / ruby / deno / bun.
+
+If you need to run interpreter code that legitimately references a
+network keyword (e.g. printing documentation about urllib), write the
+code to a script file via the Write tool — the regex only triggers on
+inline -c/-e/-r bodies.
+
+See https://github.com/sharkyger/claude-code-prompt-injection-gate
+for the threat model.
+MSG
+  exit 2
+fi
+
+# Stage 1: does the command invoke a known fetcher at a command boundary?
 # Word-boundary chars BEFORE: start-of-string OR shell separator
 # (|, &, ;, backtick, open-paren). A plain space does NOT count —
 # that's how we avoid catching `man wget` or `git curl-config`.
@@ -122,17 +192,30 @@ fi
 # closes the `curl;rm` gap where a separator butts directly against
 # the command name with no whitespace.
 #
+# Fetcher list: curl/wget (originals), wget2 (next-gen wget), the
+# HTTPie family (http/https/httpie/xh/curlie), aria2c (downloader),
+# and text-mode browsers (lynx/links/w3m/elinks) that return page
+# content. Note `http` and `https` as Stage-1 tokens are HTTPie's
+# binary names; they cannot false-match a URL like `https://x.com`
+# because the trailing boundary requires a space/separator/EOS, and
+# `https://` never sits at one (the `:` is not in the boundary set).
+#
+# `open` (macOS) is deliberately NOT in this list — it opens a URL in
+# the user's browser but does not return content to the agent's
+# context, so it's not a safe-fetch bypass. Browser-exfil concerns
+# are a separate threat handled outside this hook.
+#
 # The optional `rtk[[:space:]]+(proxy[[:space:]]+)?` prefix catches the
 # rtk (Rust Token Killer) wrapper pattern. rtk's Claude Code hook
 # rewrites Bash calls to `rtk proxy <cmd>` for token savings; without
-# this allowance, every rtk-wrapped curl/wget would slip past the
-# fetch gate because curl is then preceded by a plain space, not a
+# this allowance, every rtk-wrapped fetcher would slip past the
+# gate because the fetcher is then preceded by a plain space, not a
 # separator. The prefix match preserves the `man curl` / `git
 # curl-config` false-positive shield — those are preceded by a non-rtk
-# token, so the rtk group doesn't match and the bare-curl path
+# token, so the rtk group doesn't match and the bare path
 # requires a separator that they don't satisfy.
 if ! echo "$COMMAND" \
-     | grep -qE '(^|[|&;`(])[[:space:]]*(rtk[[:space:]]+(proxy[[:space:]]+)?)?(curl|wget)([[:space:]|&;]|$)'; then
+     | grep -qE '(^|[|&;`(])[[:space:]]*(rtk[[:space:]]+(proxy[[:space:]]+)?)?(curl|wget|wget2|http|https|httpie|xh|curlie|aria2c|lynx|links|w3m|elinks)([[:space:]|&;]|$)'; then
   exit 0
 fi
 
@@ -176,7 +259,7 @@ case "$URL_PART" in
 esac
 
 cat >&2 <<MSG
-BLOCKED: raw curl/wget against non-allowlisted host.
+BLOCKED: raw fetcher against non-allowlisted host.
 
   Host: ${HOST}
 
@@ -188,8 +271,8 @@ sandbox and the response is returned wrapped in <UNTRUSTED-WEB> tags:
 If the URL is genuinely trustworthy (first-party docs, your own
 infra), extend the allowlist in BOTH files:
 
-  ~/.claude/hooks/injection-gate-bash.sh
-  ~/.claude/hooks/injection-gate-webfetch.sh
+  hooks/injection-gate-bash.sh
+  hooks/injection-gate-webfetch.sh
 
 See https://github.com/sharkyger/claude-code-prompt-injection-gate
 for the allowlist syntax and threat model.

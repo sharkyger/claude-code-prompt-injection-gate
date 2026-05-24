@@ -1,12 +1,12 @@
-"""Tests for the WebFetch + Agent injection-gate hooks (warn-only).
+"""Tests for the WebFetch + Agent injection-gate hooks.
 
 Hook scripts are bash; we exercise them via subprocess so the JSON
 contract surfaces the same way Claude Code would call them.
 
-These two hooks are warn-only: they surface context to the model but
-never set a non-zero exit code, so all assertions check returncode == 0
-plus stdout content. Block-path tests live in the Bash and Write/Edit
-hook test files.
+WebFetch hook: hard-blocks non-allowlisted URLs (exit 2, message on
+stderr) since v1.1; allowlisted URLs still pass silently with exit 0.
+Agent hook: wraps subagent output in <UNTRUSTED-SUBAGENT> envelope
+(exit 0, content on stdout).
 """
 
 import json
@@ -49,14 +49,17 @@ class TestWebFetchAllowlist:
         assert result.returncode == 0
         assert result.stdout == ""
 
-    def test_non_allowlist_emits_warning_but_returns_zero(self):
+    def test_non_allowlist_hard_blocks(self):
         result = run_hook(
             WEBFETCH_HOOK,
             {"tool_name": "WebFetch", "tool_input": {"url": "https://example.com/article"}},
         )
-        assert result.returncode == 0
-        assert "NOT on the first-party allowlist" in result.stdout
-        assert "example.com" in result.stdout
+        assert result.returncode == 2
+        assert result.stdout == ""
+        assert "BLOCKED" in result.stderr
+        assert "not on the first-party allowlist" in result.stderr
+        assert "example.com" in result.stderr
+        assert "safe-fetch" in result.stderr
 
     def test_non_webfetch_tool_is_noop(self):
         result = run_hook(
@@ -80,8 +83,8 @@ class TestWebFetchAllowlist:
             WEBFETCH_HOOK,
             {"tool_name": "WebFetch", "tool_input": {"url": "https://аnthropic.com/"}},
         )
-        assert result.returncode == 0
-        assert "NOT on the first-party allowlist" in result.stdout
+        assert result.returncode == 2
+        assert "BLOCKED" in result.stderr
 
     def test_uppercase_host_normalized_for_allowlist(self):
         result = run_hook(

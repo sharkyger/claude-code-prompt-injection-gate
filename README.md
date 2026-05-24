@@ -16,8 +16,8 @@ This repo ships the enforcement layer:
 
 | Layer | What it does | File |
 |-------|--------------|------|
-| 1 | PreToolUse hook on `WebFetch` — allowlist-aware routing | [`hooks/injection-gate-webfetch.sh`](hooks/injection-gate-webfetch.sh) |
-| 2 | PreToolUse hook on `Bash` — blocks raw curl/wget against non-allowlisted hosts and tells the model to use `safe-fetch` instead. Also blocks any reference to the marker dir, preventing the agent from forging a write-authorization marker. | [`hooks/injection-gate-bash.sh`](hooks/injection-gate-bash.sh) |
+| 1 | PreToolUse hook on `WebFetch` — allowlist-aware hard-block. Non-allowlisted hosts get `exit 2` with a stderr message directing the model at `safe-fetch`. Allowlisted hosts pass silently. | [`hooks/injection-gate-webfetch.sh`](hooks/injection-gate-webfetch.sh) |
+| 2 | PreToolUse hook on `Bash` — two detectors. **Stage 1** blocks the common fetchers (`curl`, `wget`, `wget2`, HTTPie family — `http`/`https`/`httpie`/`xh`/`curlie`, `aria2c`, and text-mode browsers — `lynx`/`links`/`w3m`/`elinks`) against non-allowlisted hosts. **Stage A** (v1.1) blocks inline interpreter fetches — `python -c` / `node -e` / `php -r` / `perl -e` / `ruby -e` / `deno`/`bun` invocations whose body references a network primitive — to close the one-liner bypass. Also blocks any reference to the marker dir, preventing the agent from forging a write-authorization marker. | [`hooks/injection-gate-bash.sh`](hooks/injection-gate-bash.sh) |
 | 3 | PostToolUse hook on `Agent` — wraps subagent return text in an untrusted-subagent envelope so the parent treats it as data. | [`hooks/injection-gate-agent.sh`](hooks/injection-gate-agent.sh) |
 | 4 | PreToolUse hook on `Write`/`Edit` — gates writes to five protected destination categories (CLAUDE.md, settings.json, hook files, skill files, project-memory files) behind a single-use marker file. | [`hooks/injection-gate-write-edit.sh`](hooks/injection-gate-write-edit.sh) |
 | 5 | Five operator slash commands that write the marker — only way to authorize a protected-path write. | [`commands/`](commands/) |
@@ -134,7 +134,9 @@ same trust boundary at two different tool surfaces.
 ## Testing
 
 ```bash
-# 114 unit tests over all four hooks + the five slash commands
+# Unit tests over all four hooks, the five slash commands, plus an
+# end-to-end smoke matrix that exercises both fetch hooks via the
+# same JSON contract Claude Code uses at runtime.
 python3 -m pytest tests/ -v
 ```
 
@@ -145,7 +147,7 @@ the same way Claude Code calls them. No mocks for shell behaviour.
 
 - **Semantic adversarial prose** (vector 5 in the threat model) —
   natural-language injections with no Unicode/HTML tells. Requires
-  an LLM-judge step; punted to v1.1.
+  an LLM-judge step; not in scope for the regex-based hooks.
 - **Install-time malicious dependencies** — if a hook or skill ships
   with malicious code in it, runtime hooks won't catch it. Use
   the CVE-gate trio
@@ -157,6 +159,14 @@ the same way Claude Code calls them. No mocks for shell behaviour.
   an injection inside the page can steer it. We can't intercept this
   step. Recommendation: use `safe-fetch` for non-allowlisted URLs
   (avoids WebFetch entirely).
+
+## See also
+
+If you also use [Mistral Vibe](https://github.com/mistralai/mistral-vibe)
+(`vibe`), the same posture is achievable via its TOML permission
+config rather than shell hooks (Vibe upstream has no PreToolUse hook
+type). See [`docs/vibe-parity.md`](docs/vibe-parity.md) for the
+mapping.
 
 ## License
 

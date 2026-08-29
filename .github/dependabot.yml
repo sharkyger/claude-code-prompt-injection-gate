@@ -1,0 +1,17 @@
+version: 2
+# Added 2026-08-29. This repo had NO dependabot.yml, so no VERSION updates ran —
+# only security updates, which fire from repo settings without a config.
+# github-actions is the only ecosystem here: the gate ships as hooks/scripts
+# with no package manifest, so there is nothing else for Dependabot to track.
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "ci"
+    groups:
+      github-actions:
+        applies-to: version-updates
+        patterns: ["*"]
